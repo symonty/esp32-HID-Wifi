@@ -10,6 +10,7 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <Update.h>
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -21,6 +22,8 @@ const char *default_password = "";
 #ifndef PIN_LED
 #define PIN_LED 48
 #endif
+
+const char *FIRMWARE_VERSION = "v1.1.1 (" __DATE__ " " __TIME__ ")";
 
 USBHIDKeyboard Keyboard;
 WebServer server(80);
@@ -160,11 +163,45 @@ const char INDEX_HTML[] PROGMEM = R"=====(
             background: rgba(255, 255, 255, 0.1);
             margin: 2rem 0;
         }
+        .ota-section {
+            text-align: left;
+        }
+        .ota-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #cbd5e1;
+            margin-bottom: 0.75rem;
+        }
+        .ota-controls {
+            display: flex;
+            gap: 0.75rem;
+        }
+        .btn-secondary {
+            background-color: #334155;
+            box-shadow: none;
+            flex: 1;
+        }
+        .btn-secondary:hover {
+            background-color: #475569;
+            box-shadow: none;
+        }
+        #uploadBtn {
+            flex: 1.5;
+        }
+        #uploadBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>HID Controller</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h1>HID Controller</h1>
+            <span style="font-size: 0.7rem; color: #64748b; background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 10px;">%VERSION%</span>
+        </div>
         <p>ESP32-S3 Virtual keyboard</p>
         
         <button class="btn" onclick="sendSpace()">
@@ -196,6 +233,26 @@ const char INDEX_HTML[] PROGMEM = R"=====(
 
         <div class="status">
             <span class="indicator"></span> Connected via USB
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="ota-section">
+            <label class="ota-label">Firmware Update</label>
+            <div class="ota-controls">
+                <input type="file" id="fileInput" name="update" style="display:none" onchange="updateFileName()">
+                <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <span id="fileNameDisplay">Select .bin</span>
+                </button>
+                <button class="btn" id="uploadBtn" onclick="uploadFirmware()" disabled>
+                    Upload & Reboot
+                </button>
+            </div>
+            <div id="progressContainer" style="display:none; margin-top: 1rem; background: rgba(0,0,0,0.3); border-radius: 10px; height: 8px; overflow: hidden;">
+                <div id="progressBar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.3s ease;"></div>
+            </div>
+            <div id="otaStatus" style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;"></div>
         </div>
     </div>
 
@@ -236,6 +293,86 @@ const char INDEX_HTML[] PROGMEM = R"=====(
                         btn.disabled = false;
                     }, 100);
                 });
+        }
+
+        function updateFileName() {
+            const input = document.getElementById('fileInput');
+            const display = document.getElementById('fileNameDisplay');
+            const uploadBtn = document.getElementById('uploadBtn');
+            if (input.files.length > 0) {
+                display.innerText = input.files[0].name;
+                uploadBtn.disabled = false;
+            }
+        }
+
+        function uploadFirmware() {
+            const input = document.getElementById('fileInput');
+            const btn = document.getElementById('uploadBtn');
+            const prgContainer = document.getElementById('progressContainer');
+            const prgBar = document.getElementById('progressBar');
+            const status = document.getElementById('otaStatus');
+
+            if (input.files.length === 0) return;
+
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append('update', file);
+
+            btn.disabled = true;
+            prgContainer.style.display = 'block';
+            status.innerText = 'Uploading...';
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/update', true);
+
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percent = (e.loaded / e.total) * 100;
+                    prgBar.style.width = percent + '%';
+                    status.innerText = `Uploading: ${Math.round(percent)}%`;
+                }
+            };
+
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    let countdown = 5;
+                    const updateStatus = () => {
+                        if (countdown > 0) {
+                            status.innerText = `Update successful! Rebooting in ${countdown}s...`;
+                            status.style.color = '#10b981';
+                            countdown--;
+                            setTimeout(updateStatus, 1000);
+                        } else {
+                            status.innerText = 'Attempting to reconnect...';
+                            const checkOnline = setInterval(() => {
+                                fetch('/')
+                                    .then(response => {
+                                        if (response.ok) {
+                                            clearInterval(checkOnline);
+                                            location.reload();
+                                        }
+                                    })
+                                    .catch(() => {
+                                        // Still offline, just wait for next interval
+                                    });
+                            }, 2000);
+                        }
+                    };
+                    updateStatus();
+                } else {
+                    status.innerText = 'Update failed: ' + xhr.responseText;
+                    status.style.color = '#ef4444';
+                    btn.disabled = false;
+                }
+            };
+
+            xhr.onerror = function() {
+                status.innerText = 'Upload error occurred.';
+                status.style.color = '#ef4444';
+                btn.disabled = false;
+            };
+
+            xhr.send(formData);
         }
     </script>
 </body>
@@ -354,12 +491,13 @@ const char CONFIG_HTML[] PROGMEM = R"=====(
 </html>
 )=====";
 
-// --- HANDLERS ---
 void handleRoot() {
   if (isAPMode) {
     server.send(200, "text/html", CONFIG_HTML);
   } else {
-    server.send(200, "text/html", INDEX_HTML);
+    String html = INDEX_HTML;
+    html.replace("%VERSION%", FIRMWARE_VERSION);
+    server.send(200, "text/html", html);
   }
 }
 
@@ -427,6 +565,34 @@ void handleSendText() {
 
   Keyboard.releaseAll();
   server.send(200, "text/plain", "OK");
+}
+
+void handleUpdate() {
+  server.sendHeader("Connection", "close");
+  server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleUpload() {
+  HTTPUpload &upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    Serial.printf("Update: %s\n", upload.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { // start with max available size
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    /* flashing firmware to ESP*/
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Update.printError(Serial);
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) { // true to set the size to the current progress
+      Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+    } else {
+      Update.printError(Serial);
+    }
+  }
 }
 
 void startAP() {
@@ -499,6 +665,7 @@ void setup() {
     server.on("/", handleRoot);
     server.on("/send_space", handleSendSpace);
     server.on("/send_text", handleSendText);
+    server.on("/update", HTTP_POST, handleUpdate, handleUpload);
     server.begin();
     Serial.println("HTTP Server Started");
 
