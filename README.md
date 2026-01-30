@@ -8,6 +8,7 @@ This project transforms a **SuperMini ESP32-S3** into a powerful, web-controllab
 - **Native USB HID Emulation**: Acts as a physical keyboard directly recognized by the host.
 - **Advanced Mac Support**: Includes `Cmd` (GUI/Win) modifier key specifically for macOS workflows.
 - **Custom Text Entry**: Send entire strings of text with combinations of **Ctrl**, **Shift**, **Alt**, and **Cmd**.
+- **WiFi Auto-Config**: Automatically enters Access Point mode if WiFi fails, allowing setup via a captive portal.
 - **RGB Status LED**: Real-time feedback via the onboard WS2812 (Pin 48).
 - **Responsive Web Dashboard**: A sleek, dark-mode glassmorphism interface.
 
@@ -16,6 +17,7 @@ This project transforms a **SuperMini ESP32-S3** into a powerful, web-controllab
 | Animation | State | Description |
 | :--- | :--- | :--- |
 | **Flashing Red** | 🔴 Connecting | Attempting to join the WiFi network. |
+| **Pulsing Purple** | 🟣 AP Mode | Connection failed. Hotspot active at `192.168.4.1` for WiFi setup. |
 | **Rainbow Cycle** | 🌈 Idle | WiFi connected and waiting for commands. |
 | **Flashing Blue** | 🔵 Sending | HID command is currently being transmitted to host. |
 
@@ -51,6 +53,15 @@ Navigate to the IP address shown in the serial logs (or `http://esp32-hid.local`
 - **Send Space**: Instant large button for spacebar.
 - **Send Text**: Input field for custom strings.
 - **Modifiers**: Checkboxes for Ctrl, Shift, Alt, and Cmd to hold down while the text is "typed".
+
+### 📶 WiFi Setup (First Time / Failure)
+
+If the device cannot connect to a saved network (or it's the first run):
+1. The LED will pulse **Purple**.
+2. Connect to the WiFi hotspot named **`ESP32-HID-Config`**.
+3. A portal should open automatically (if not, go to `192.168.4.1`).
+4. Enter your SSID and Password, then click **Save & Reboot**.
+5. The device will store these settings permanently and reconnect.
 
 ---
 *Developed with ❤️ by **symonty** for ESP32-S3 SuperMini.*
